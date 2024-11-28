@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
-import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
 
 contract ExampleStrategy is IStrategy {
@@ -21,11 +21,15 @@ contract ExampleStrategy is IStrategy {
         totalInvested -= amount;
     }
 
-    function getRewards() external override returns (uint256) {
+    function getRewards() external override view returns (uint256) {
         return totalInvested / 10;
     }
 
-    function getAPY() external override returns (uint256) {
+    function getAPY() external override pure returns (uint256) {
         return 10;
     }
+
+    function distributedRewards(uint256 totalRewards) external override {
+        rewardToken.transfer(msg.sender, totalRewards);
+    }    
 }

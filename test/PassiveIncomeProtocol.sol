@@ -1,35 +1,41 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/PassiveIncomeProtocol.sol";
 import "../src/strategies/ExampleStrategy.sol";
-import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 
 contract PassiveIncomeProtocolTest is Test {
     PassiveIncomeProtocol protocol;
     ExampleStrategy strategy;
-    ERC20 stableToken;
+    ERC20Mock stableToken;
     address user = address(0x123);
+    address owner = address(0x456);
 
     function setUp() public {
-        stableToken = new ERC20("StableToken", "STABLE");
-        protocol = new PassiveIncomeProtocol(address(stableToken));
+        stableToken = new ERC20Mock();
+        protocol = new PassiveIncomeProtocol(address(stableToken), owner);
         strategy = new ExampleStrategy(address(stableToken));
         stableToken.mint(user, 100 ether);
+
+        vm.startPrank(user);
+        stableToken.approve(address(protocol), 100 ether);
+        vm.stopPrank();
+
+        protocol.addStrategy(address(strategy));
     }
 
     function testDepositAndWithdraw() public {
         vm.startPrank(user);
-        stableToken.approve(address(protocol), 500 ether);
-        protocol.deposit(500 ether);
+        protocol.deposit(50 ether);
 
         uint256 balanceAfterDeposit = protocol.userBalances(user);
-        assertEq(balanceAfterDeposit, 500 ether);
+        assertEq(balanceAfterDeposit, 50 ether);
 
-        protocol.withdraw(200 ether);
+        protocol.withdraw(20 ether);
         uint256 balanceAfterWithdraw = protocol.userBalances(user);
-        assertEq(balanceAfterWithdraw, 300 ether);
+        assertEq(balanceAfterWithdraw, 30 ether);
 
         vm.stopPrank();
     }
@@ -37,5 +43,30 @@ contract PassiveIncomeProtocolTest is Test {
     function testAddStrategy() public {
         protocol.addStrategy((address(strategy)));
         assertEq(protocol.strategies(0), address(strategy));
+    }
+
+    function testRewardsCollection() public {
+        vm.startPrank(user);
+        protocol.deposit(50 ether);
+        vm.stopPrank();
+
+        uint256 initialRewards = strategy.getRewards();
+
+        vm.startPrank(owner);
+        protocol.collectRewards();
+        uint256 totalRewards = strategy.getRewards();
+        assertEq(totalRewards, initialRewards + 5 ether);
+
+        vm.stopPrank();
+    }
+
+    function testMinting() public {
+        uint256 initialSupply = stableToken.totalSupply();
+
+        vm.startPrank(owner);
+        stableToken.mint(address(protocol), 50 ether);
+        vm.stopPrank();
+
+        assertEq(stableToken.totalSupply(), initialSupply + 50 ether);
     }
 }
