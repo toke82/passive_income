@@ -28,7 +28,7 @@ contract PassiveIncomeProtocol is Ownable {
 
         userBalances[msg.sender] += amount;
         totalDeposits += amount;
-
+        
         emit Deposit(msg.sender, amount);
     }
 
@@ -50,8 +50,15 @@ contract PassiveIncomeProtocol is Ownable {
     function collectRewards() external onlyOwner {
         uint256 totalRewards = 0;
         for (uint256 i = 0; i < strategies.length; i++) {
-            totalRewards += IStrategy(strategies[i]).getRewards();
+            uint256 strategyRewards = IStrategy(strategies[i]).getRewards();
+            totalRewards += strategyRewards;
+
+            if (strategyRewards > 0) {
+                IStrategy(strategies[i]).distributedRewards(strategyRewards);
+            }
         }
+
+        require(totalRewards > 0, "No rewards to collect");
 
         emit RewardsCollected(totalRewards);
     }
