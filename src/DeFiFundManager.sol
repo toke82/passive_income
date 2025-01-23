@@ -4,9 +4,10 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IStrategy} from "./interfaces/IStrategy.sol";
 
-contract DeFiFundManager is ERC20, Ownable {
+contract DeFiFundManager is ERC20, Ownable, ReentrancyGuard {
     IERC20 public immutable stableToken;
     IStrategy[] public strategies;
     mapping(address => uint256) public userDeposits;
@@ -18,6 +19,7 @@ contract DeFiFundManager is ERC20, Ownable {
     event Withdraw(address indexed user, uint256 amount);
     event StrategyAdded(address strategy);
     event RewardsCollected(uint256 totalRewards);
+    event StrategyFailed(address strategy, uint256 amount);
 
     constructor(address _stableToken, address initialOwner) ERC20("DeFi LP Token", "DFLP") Ownable(initialOwner) {
         require(_stableToken != address(0), "Stable token address cannot be zero");
@@ -29,7 +31,7 @@ contract DeFiFundManager is ERC20, Ownable {
      * @notice Deposit stable tokens and receive LP tokens.
      * @param amount The amount of stable token to deposit.
      */
-    function deposit(uint256 amount) external {
+    function deposit(uint256 amount) external nonReentrant {
         require(amount > 0, "Amount must be greater than 0");
 
         // Check allowance before transferring tokens
@@ -56,7 +58,7 @@ contract DeFiFundManager is ERC20, Ownable {
      * @notice Withdraw stable tokens by burning LP tokens.
      * @param lpAmount The amount lf LP tokens to burn.
      */
-    function withdraw(uint256 lpAmount) external {
+    function withdraw(uint256 lpAmount) external nonReentrant {
         require(lpAmount > 0, "LP amount must be greater than 0");
         require(balanceOf(msg.sender) >= lpAmount, "Insufficient LP tokens");
 
@@ -84,6 +86,7 @@ contract DeFiFundManager is ERC20, Ownable {
      */
     function addStrategy(address strategy) external onlyOwner {
         require(strategy != address(0), "Strategy address cannot be zero");
+        require(IStrategy(strategy).supportsInterface(type(IStrategy).interfaceId), "Invalid strategy interface");
         strategies.push(IStrategy(strategy));
         cacheValid = false;
         emit StrategyAdded(strategy);
@@ -108,7 +111,7 @@ contract DeFiFundManager is ERC20, Ownable {
                 stableToken.approve(address(strategies[i]), 0);
             } catch {
                 stableToken.approve(address(strategies[i]), 0); // Ensure approval is cleared
-                revert("Strategy deposit failed");
+                emit StrategyFailed(address(strategies[i]), allocation);
             }            
         }
 
@@ -124,6 +127,9 @@ contract DeFiFundManager is ERC20, Ownable {
 
         for (uint256 i = 0; i < strategiesCount; i++) {
             uint256 strategyRewards = IStrategy(strategies[i]).getRewards();
+
+            require(strategyRewards <= type(uint256).max - totalRewards, "Overflow detected");
+
             totalRewards += strategyRewards;
 
             if (strategyRewards > 0) {
@@ -153,12 +159,7 @@ contract DeFiFundManager is ERC20, Ownable {
      * @return The total funds managed by the protocol.
      */
     function getTotalFunds() public view returns (uint256) {
-        uint256 total = stableToken.balanceOf(address(this));
-        for (uint256 i = 0; i < strategies.length; i++) {
-            total += strategies[i].getBalance();
-        }
-
-        return total;
+        return cacheValid ? cachedTotalFunds : _calculateTotalFunds();
     }
 
     /**
